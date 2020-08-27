@@ -1,0 +1,37 @@
+# This is an example configuration file for running non-sequential experiments.
+
+# ===== INPUTS =====
+experiment_name: nonsequential_experiment
+
+model: resnet-110  # Name of model used for experiment
+train_set: cifar10  # Dataset model was trained on
+test_set: cifar10  # Dataset used for calibration and evaluation
+num_classes: 10  # Number of classes in test set (NB: Should match train_set)
+
+
+batch_size: # Batch sizes to be iterated over
+  - 25
+  - 50
+  - 100
+  - 250
+  - 500
+
+num_runs: 25  # Number of trials
+
+
+prior_params:  # Prior parameters ; assumes we place the same prior on all delta's
+  beta_mu: 0
+  beta_sigma: 3
+  delta_mu: 0
+  delta_sigma: 1
+
+mcmc_params:  # Parameters for NUTS / HMC sampler
+  samples: 500
+  warmup: 1000
+  num_chains: 4
+
+seed: 1776  # Fixed seed for reproducibility
+
+# ===== Things that don't really need to be messed with =====
+eval_batch_size: 100  # Batch size for evaluation
+num_eval: 5000  # Size of evaluation set ; to be split from test_set
