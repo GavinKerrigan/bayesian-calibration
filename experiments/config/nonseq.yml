@@ -10,27 +10,29 @@ num_classes: 10  # Number of classes in test set (NB: Should match train_set)
 
 
 batch_size: # Batch sizes to be iterated over
-  - 25
+  - 10
+  - 20
+  - 30
   - 50
   - 100
+  - 150
   - 250
-  - 500
 
-num_runs: 2  # Number of trials
+num_runs: 25  # Number of trials
 
 
 prior_params:  # Prior parameters ; assumes we place the same prior on all delta's
   mu_beta: 0
-  sigma_beta: 3
+  sigma_beta: 1
   mu_delta: 0
   sigma_delta: 1
 
 mcmc_params:  # Parameters for NUTS / HMC sampler
-  samples: 500
+  samples: 250
   warmup: 1000
   num_chains: 4
 
-seed: 1234  # Fixed seed for reproducibility
+seed: 124  # Fixed seed for reproducibility
 
 # ===== Things that don't really need to be messed with =====
 eval_batch_size: 100  # Batch size for evaluation

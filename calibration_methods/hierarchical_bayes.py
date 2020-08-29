@@ -72,8 +72,10 @@ class HierarchicalBayesianCalibrator:
 
         print('--------| Running inference ')
         nuts_kernel = NUTS(hbc_model, **self.NUTS_params)
-        self.mcmc = MCMC(nuts_kernel, **self.mcmc_params, disable_progbar=True)
+        self.mcmc = MCMC(nuts_kernel, **self.mcmc_params, disable_progbar=False)
+        print('.')
         self.mcmc.run(self.prior_params, logits, labels, self.delta_constraint)
+        print('..')
 
         #  TODO: update posterior (for sequential)
         # self._update_posterior(posterior_samples)

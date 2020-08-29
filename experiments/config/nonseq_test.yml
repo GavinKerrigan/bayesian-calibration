@@ -11,9 +11,8 @@ num_classes: 10  # Number of classes in test set (NB: Should match train_set)
 
 batch_size: # Batch sizes to be iterated over
   - 250
-  - 500
 
-num_runs: 2  # Number of trials
+num_runs: 1  # Number of trials
 
 
 prior_params:  # Prior parameters ; assumes we place the same prior on all delta's

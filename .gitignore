@@ -133,4 +133,7 @@ dmypy.json
 .idea/
 models/
 data/
+scrap/
+output/
+figures/
 *.ipynb
