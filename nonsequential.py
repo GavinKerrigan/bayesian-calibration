@@ -73,6 +73,7 @@ def run_experiment(model, calibration_dataset, eval_dataset, **kwargs):
                             delta_constraint='hard')
             hbc_model.update(logits, labels)
             eval_probs_hbc = hbc_model.calibrate(eval_logits)
+
             # --------| Get metrics
             marginal_ce_hbc_run.append(marginal_ce(eval_probs_hbc, eval_labels.int().numpy(), debias=debias))
             ece_hbc_run.append(expected_calibration_error(eval_probs_hbc, eval_labels))
