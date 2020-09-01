@@ -40,7 +40,18 @@ def load_trained_model(model_name, train_set, device=torch.device('cpu')):
         state_dict = _strip_parallel_model(state_dict)
         model = resnet(num_classes=num_classes[train_set], depth=110, block_name='BasicBlock')
         model.load_state_dict(state_dict)
-
+        model.eval()
+    elif model_name == 'alexnet':
+        from models.alexnet import alexnet
+        state_dict = _strip_parallel_model(state_dict)
+        model = alexnet(num_classes=num_classes[train_set])
+        model.load_state_dict(state_dict)
+        model.eval()
+    elif model_name == 'vgg19-bn':
+        from models.vgg import vgg19_bn
+        state_dict = _strip_parallel_model(state_dict)
+        model = vgg19_bn(num_classes=num_classes[train_set])
+        model.load_state_dict(state_dict)
         model.eval()
     else:
         raise NotImplementedError
