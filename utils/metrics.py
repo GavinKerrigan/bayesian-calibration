@@ -63,3 +63,56 @@ def expected_calibration_error(probs, labels, bins=15):
     ece = (1. / batch_size) * np.sum([counts[i] * np.abs(confidences[i] - accuracies[i])
                                       for i in range(bins) if counts[i] > 0])
     return ece
+
+
+def classwise_ece(probs, labels, bins=15):
+    """ Computes the classwise ECE (Kull et al, 2019)
+
+    See: (Kull et al, 2019) "Beyond temperature scaling: Obtaining well-calibrated multiclass probabilities
+                            with Dirichlet calibration"
+
+    Args:
+        probs: tensor ; shape (batch_size, num_classes)
+        labels: tensor ; shape (batch_size, )
+    """
+    assert labels.shape[0] == probs.shape[0], 'Label/probs shape mismatch'
+
+    batch_size, num_classes = probs.shape
+    onehot_labels = torch.from_numpy(label_binarize(labels, classes=np.arange(num_classes))).float()
+
+    ece_per_class = []
+    for i in range(num_classes):
+        # Probabilities / one-hot labels for the ith class
+        class_probs = probs[:, i]
+        class_labels = onehot_labels[:, i]
+
+        ece_this_class = _one_class_ece(class_probs, class_labels, bins=bins)
+        ece_per_class.append(ece_this_class)
+
+    # cw-ECE is mean of all class-i ECEs
+    cw_ece = np.mean(ece_per_class)
+
+    return cw_ece, ece_per_class
+
+
+def _one_class_ece(probs, labels, bins=15):
+    """  Helper function for classwise ECE -- computes the ECE for a single class.
+
+    Args:
+        probs: tensor ; shape (batch_size, )
+        labels: tensor ; shape (batch_size )
+            Assumed to be binary
+    """
+    batch_size = probs.shape[0]
+
+    counts, bin_edges = np.histogram(probs, bins=bins, range=[0., 1.])
+    indices = np.digitize(probs, bin_edges, right=True)
+
+    bin_probs = np.array([torch.mean(probs[indices == j]).item() for j in range(1, bins + 1)])
+    bin_proportions = np.array([torch.mean(labels[indices == i]).item()
+                                for i in range(1, bins + 1)])
+
+    this_class_ece = (1. / batch_size) * np.sum([counts[i] * np.abs(bin_probs[i] - bin_proportions[i])
+                                                 for i in range(bins) if counts[i] > 0])
+
+    return this_class_ece
