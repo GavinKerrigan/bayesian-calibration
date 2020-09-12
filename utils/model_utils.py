@@ -1,6 +1,5 @@
 import pathlib
 import time
-
 import torch
 
 """ This file is used for various model utilities, e.g. loading a pre-trained model.
@@ -23,39 +22,46 @@ def load_trained_model(model_name, train_set, device=torch.device('cpu')):
     print('\nLoading pre-trained model')
     print('----| Model: {}  Train set: {}'.format(model_name, train_set))
 
-    num_classes = {'cifar100': 100,
-                   'cifar10': 10}
+    train_set = train_set.lower()
 
-    train_set = train_set.lower().strip()
-    model_name = model_name.lower().strip()
+    if train_set.startswith('cifar'):
+        # Load local cifar-trained models
+        num_classes = {'cifar100': 100,
+                       'cifar10': 10}
 
-    # Load the saved state dict
-    path_str = 'models/checkpoints/{}_{}.tar'.format(model_name, train_set)
-    checkpoint_path = pathlib.Path(path_str).resolve()
-    checkpoint = torch.load(checkpoint_path)
-    state_dict = checkpoint['state_dict']
+        train_set = train_set.lower().strip()
+        model_name = model_name.lower().strip()
 
-    if model_name == 'resnet-110':
-        from models.resnet import resnet
-        state_dict = _strip_parallel_model(state_dict)
-        model = resnet(num_classes=num_classes[train_set], depth=110, block_name='BasicBlock')
+        # Load the saved state dict
+        path_str = 'models/checkpoints/{}_{}.tar'.format(model_name, train_set)
+        checkpoint_path = pathlib.Path(path_str).resolve()
+        checkpoint = torch.load(checkpoint_path)
+        state_dict = checkpoint['state_dict']
+
+        if model_name == 'resnet-110':
+            from models.resnet import resnet
+            state_dict = _strip_parallel_model(state_dict)
+            model = resnet(num_classes=num_classes[train_set], depth=110, block_name='BasicBlock')
+        elif model_name == 'alexnet':
+            from models.alexnet import alexnet
+            state_dict = _strip_parallel_model(state_dict)
+            model = alexnet(num_classes=num_classes[train_set])
+        elif model_name == 'vgg19-bn':
+            from models.vgg import vgg19_bn
+            state_dict = _strip_parallel_model(state_dict)
+            model = vgg19_bn(num_classes=num_classes[train_set])
+        else:
+            raise NotImplementedError
+
         model.load_state_dict(state_dict)
-        model.eval()
-    elif model_name == 'alexnet':
-        from models.alexnet import alexnet
-        state_dict = _strip_parallel_model(state_dict)
-        model = alexnet(num_classes=num_classes[train_set])
-        model.load_state_dict(state_dict)
-        model.eval()
-    elif model_name == 'vgg19-bn':
-        from models.vgg import vgg19_bn
-        state_dict = _strip_parallel_model(state_dict)
-        model = vgg19_bn(num_classes=num_classes[train_set])
-        model.load_state_dict(state_dict)
-        model.eval()
+    elif train_set == 'imagenet':
+        # Thin wrapper to load PyTorch pretrained imagenet models
+        import torchvision.models as models
+        model = getattr(models, model_name)(pretrained=True)
     else:
         raise NotImplementedError
 
+    model.eval()
     return model.to(device)
 
 
