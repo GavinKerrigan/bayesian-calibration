@@ -1,13 +1,12 @@
-import copy
-
 import pyro
 import pyro.distributions as dist
 from pyro.infer import MCMC, NUTS
 
 import torch
 from torch.nn.functional import softmax
-from torch.distributions import constraints
 
+""" This file implements the Hierarchical Bayesian calibrator. 
+"""
 
 class HierarchicalBayesianCalibrator:
 
@@ -38,7 +37,7 @@ class HierarchicalBayesianCalibrator:
         self.timestep = 0
         self.mcmc = None  # Contains the most recent Pyro MCMC api object
 
-        print('\nInitializing BST model:\n'
+        print('\nInitializing HBC model:\n'
               '----| Prior: {} \n----| Inference Method: NUTS \n'
               '----| MCMC parameters: {}'
               ''.format(prior_params, self.mcmc_params))
@@ -55,9 +54,8 @@ class HierarchicalBayesianCalibrator:
         assert (labels.shape[0] == logits.shape[0]), 'Shape mismatch between logits ({}) and labels ({})' \
             .format(logits.shape[0], labels.shape[0])
 
-        print('prior params')
-        print(self.prior_params)
-
+        print('delta constraint::')
+        print(self.delta_constraint)
         self.timestep += 1
 
         logits = logits.detach().clone().requires_grad_()
@@ -68,7 +66,7 @@ class HierarchicalBayesianCalibrator:
 
         # TODO: Update prior (for sequential)
         # self._update_prior()
-        print('--------| Updated priors: {}'.format(self.prior_params))
+        # print('--------| Updated priors: {}'.format(self.prior_params))
 
         print('--------| Running inference ')
         nuts_kernel = NUTS(hbc_model, **self.NUTS_params)

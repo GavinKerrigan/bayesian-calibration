@@ -136,4 +136,6 @@ data/
 scrap/
 output/
 figures/
+dirichlet_python/
 *.ipynb
+*.yml
