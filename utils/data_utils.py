@@ -1,8 +1,9 @@
 import pathlib
 
+import torch
 from torchvision import transforms
 from torchvision.transforms import functional as F
-from torch.utils.data import random_split
+from torch.utils.data import random_split, Subset
 
 """ This file is used for various data-set utilities, e.g. generating a dataloader object.
 """
@@ -39,6 +40,22 @@ def load_dataset(dataset_name, **kwargs):
         # User can specify to load the training set; loads the test set by default.
         train = kwargs.pop('train', False)
         dataset = CIFAR100(data_path, train=train, transform=transform, download=True)
+    elif dataset_name == 'imagenet':
+        # Requires imagenet to be downloaded locally
+        from torchvision.datasets import ImageNet
+
+        # Standard transformation
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        dataset = ImageNet(data_path / 'imagenet', split='val', transform=transform)
+    elif dataset_name == 'cifar10r':
+        from data.nonstationary_datasets import CIFAR10R
+        dataset = CIFAR10R()
     else:
         raise NotImplementedError
 
@@ -55,6 +72,8 @@ def get_cal_eval_split(dataset_name, num_eval, **kwargs):
     dataset = load_dataset(dataset_name)
     num_cal = len(dataset) - num_eval
     cal_dataset, eval_dataset = random_split(dataset, [num_cal, num_eval])
+    if 'num_cal' in kwargs.keys():
+        cal_dataset = Subset(cal_dataset, torch.arange(kwargs['num_cal']))
 
     return cal_dataset, eval_dataset
 
