@@ -22,16 +22,22 @@ def run_experiment(model, calibration_dataset, eval_dataset, **kwargs):
     debias = False
     nll = NLLLoss()
     # Get model logits / labels on evaluation set
-    eval_loader = DataLoader(eval_dataset, batch_size=256, shuffle=False, num_workers=0)
-    eval_logits, eval_labels = model_utils.forward_pass(model, eval_loader, kwargs['num_classes'])
+    with torch.no_grad():
+        eval_loader = DataLoader(eval_dataset, batch_size=256, shuffle=False, num_workers=0)
+        eval_logits, eval_labels = model_utils.forward_pass(model, eval_loader, kwargs['num_classes'])
 
     # Storing our metrics -- probably a better way to do this but whatever
+    # Methods: TS, VS, HBC, BTS
+    marginal_ce_ts = []
     marginal_ce_vs = []
     marginal_ce_hbc = []
+
     ece_vs = []
     ece_hbc = []
+
     nll_vs = []
     nll_hbc = []
+
     brier_vs = []
     brier_hbc = []
     for run in range(kwargs['num_runs']):
