@@ -92,7 +92,7 @@ def classwise_ece(probs, labels, bins=15):
     # cw-ECE is mean of all class-i ECEs
     cw_ece = np.mean(ece_per_class)
 
-    return cw_ece, ece_per_class
+    return cw_ece
 
 
 def _one_class_ece(probs, labels, bins=15):
