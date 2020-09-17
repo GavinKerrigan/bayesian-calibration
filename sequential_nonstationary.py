@@ -13,12 +13,11 @@ from calibration_methods.hierarchical_bayes import HierarchicalBayesianCalibrato
 from calibration_methods.bayesian_tempering import BayesianTemperingCalibrator as BT
 from calibration_methods.maximum_likelihood import vector_scaling, temperature_scaling
 
-from calibration_methods.sequential_temperature_scaling import SequentialBatchTS, SequentialSGDTS
+from calibration_methods.sequential_temperature_scaling import MovingWindowTS, SequentialSGDTS
 
 """ This file runs a sequential non-stationary experiment from a given config .yml file. 
 """
 
-# TODO: Moving window batch-TS
 
 def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedule, **kwargs):
     # Initializing some various useful things
@@ -31,18 +30,20 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
     gpu = torch.device('cuda')
     cpu = torch.device('cpu')
     model = model.to(gpu)
-    calibration_dataset = calibration_dataset.to(gpu)
-    eval_dataset = eval_dataset.to(gpu)
+    #calibration_dataset = calibration_dataset.to(gpu)
+    #eval_dataset = eval_dataset.to(gpu)
 
     # TODO: Better way to store metrics.
     # Storing our metrics
     # Metrics used: ECE, NLL
-    # Methods: TSB, TSGD, BT
-    ece_tsb = []
+    # Methods: MW-TS, SGD-TS, B-TS
+    ece_nocal = []
+    ece_mwts = {window_size: [] for window_size in kwargs['window_sizes']}
     ece_tsgd = {num_grad_steps: [] for num_grad_steps in kwargs['sgd_steps']}
-    ece_bt = []
+    ece_bt = {sigma_drift: [] for sigma_drift in kwargs['sigma_drift']}
 
-    nll_tsb = []
+    nll_nocal = []
+    nll_mwts = {window_size: [] for window_size in kwargs['window_sizes']}
     nll_tsgd = {num_grad_steps: [] for num_grad_steps in kwargs['sgd_steps']}
     nll_bt = {sigma_drift: [] for sigma_drift in kwargs['sigma_drift']}
 
@@ -52,16 +53,18 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
         print('=' * 15)
 
         # Set up metrics for this run
-        ece_tsb_run = []
+        ece_nocal_run = []
+        ece_mwts_run = {window_size: [] for window_size in kwargs['window_sizes']}
         ece_tsgd_run = {num_grad_steps: [] for num_grad_steps in kwargs['sgd_steps']}
-        ece_bt_run = []
+        ece_bt_run = {sigma_drift: [] for sigma_drift in kwargs['sigma_drift']}
 
-        nll_tsb_run = []
+        nll_nocal_run = []
+        nll_mwts_run = {window_size: [] for window_size in kwargs['window_sizes']}
         nll_tsgd_run = {num_grad_steps: [] for num_grad_steps in kwargs['sgd_steps']}
         nll_bt_run = {sigma_drift: [] for sigma_drift in kwargs['sigma_drift']}
 
         # Define our calibrators
-        tsb_model = SequentialBatchTS()
+        mwts_models = {window_size: MovingWindowTS(window_size=window_size) for window_size in kwargs['window_sizes']}
         tsgd_models = {num_grad_steps: SequentialSGDTS(num_grad_steps=num_grad_steps)
                        for num_grad_steps in kwargs['sgd_steps']}
         bt_models = {sigma_drift: BT(kwargs['prior_params'], kwargs['num_classes'],
@@ -70,7 +73,7 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
 
         for i in range(kwargs['num_timesteps']):
             print('-' * 15)
-            print('Running timestep: {} of {}'.format(i, kwargs['num_timesteps']))
+            print('Running timestep: {} of {}'.format(i+1, kwargs['num_timesteps']))
             print('-' * 15)
 
             # =============================================
@@ -80,7 +83,8 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
                 # Perturb eval_set and forward pass model
                 eval_dataset.dataset.set_angle(angle_schedule[i])
                 eval_loader = DataLoader(eval_dataset, batch_size=256, shuffle=False, num_workers=0)
-                eval_logits, eval_labels = model_utils.forward_pass(model, eval_loader, kwargs['num_classes'])
+                eval_logits, eval_labels = model_utils.forward_pass(model, eval_loader, kwargs['num_classes'],
+                                                                    device=gpu)
                 # I think this is needed:
                 eval_logits = eval_logits.to(cpu)
                 eval_labels = eval_labels.to(cpu)
@@ -96,7 +100,7 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
                                                       shuffle=False, num_workers=0)
                 # Forward pass calibration batch through model
                 cal_logits, cal_labels = model_utils.forward_pass(model, calibration_batch_loader,
-                                                                  kwargs['num_classes'])
+                                                                  kwargs['num_classes'], device=gpu)
                 cal_logits = cal_logits.to(cpu)
                 cal_labels = cal_labels.to(cpu)
 
@@ -104,14 +108,18 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
             # Perform calibration with the various methods
             # =============================================
 
-            # left/right indexes of batch for convenience
+            # ---- | No calibration
+            nocal_eval_probs = softmax(eval_logits, dim=1)
+            ece_nocal_run.append(expected_calibration_error(nocal_eval_probs, eval_labels))
+            nll_nocal_run.append(nll(nocal_eval_probs.log(), eval_labels.long()).item())
 
             # ----| TSB
-            tsb_model.update(cal_logits, cal_labels.long())
-            eval_probs_tsb = tsb_model.calibrate(eval_logits)
-            # --------| Get metrics
-            ece_tsb_run.append(expected_calibration_error(eval_probs_tsb, eval_labels))
-            nll_tsb_run.append(nll(eval_probs_tsb.log(), eval_labels.long()).item())
+            for window_size in kwargs['window_sizes']:
+                mwts_models[window_size].update(cal_logits, cal_labels.long())
+                eval_probs_mwts = mwts_models[window_size].calibrate(eval_logits)
+                # --------| Get metrics
+                ece_mwts_run[window_size].append(expected_calibration_error(eval_probs_mwts, eval_labels))
+                nll_mwts_run[window_size].append(nll(eval_probs_mwts.log(), eval_labels.long()).item())
 
             # ----| TSGD
             for num_grad_steps in kwargs['sgd_steps']:
@@ -129,19 +137,28 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
                 ece_bt_run[sigma_drift].append(expected_calibration_error(eval_probs_bt, eval_labels))
                 nll_bt_run[sigma_drift].append(nll(eval_probs_bt.log(), eval_labels.long()).item())
 
-        ece_tsb.append(ece_tsb_run)
-        nll_tsb.append(nll_tsb_run)
+        # Store run data
+        ece_nocal.append(ece_nocal_run)
+        nll_nocal.append(nll_nocal_run)
+
+        for window_size in kwargs['window_sizes']:
+            ece_mwts[window_size].append(ece_mwts_run[window_size])
+            nll_mwts[window_size].append(ece_mwts_run[window_size])
 
         for num_grad_steps in kwargs['sgd_steps']:
             ece_tsgd[num_grad_steps].append(ece_tsgd_run[num_grad_steps])
             nll_tsgd[num_grad_steps].append(nll_tsgd_run[num_grad_steps])
 
-        ece_bt.append(ece_bt_run)
-        nll_bt.append(nll_bt_run)
+        for sigma_drift in kwargs['sigma_drift']:
+            ece_bt[sigma_drift].append(ece_bt_run[sigma_drift])
+            nll_bt[sigma_drift].append(nll_bt_run[sigma_drift])
 
-        # Save after every run in case I need to end early / the run crashes
-        pd.DataFrame(data=ece_tsb, columns=pd_cols).to_csv('ece_tsb.csv')
-        pd.DataFrame(data=nll_tsb, columns=pd_cols).to_csv('nll_tsb.csv')
+        # Save after every run in case the run crashes
+        pd.DataFrame(data=ece_nocal, columns=pd_cols).to_csv('ece_nocal.csv')
+        pd.DataFrame(data=nll_nocal, columns=pd_cols).to_csv('nll_nocal.csv')
+        for window_size in kwargs['window_sizes']:
+            pd.DataFrame(data=ece_mwts[window_size], columns=pd_cols).to_csv('ece_mwts{}.csv'.format(window_size))
+            pd.DataFrame(data=nll_mwts[window_size], columns=pd_cols).to_csv('nll_mwts{}.csv'.format(window_size))
 
         for num_grad_steps in kwargs['sgd_steps']:
             pd.DataFrame(data=ece_tsgd[num_grad_steps],
@@ -149,11 +166,14 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
             pd.DataFrame(data=nll_tsgd[num_grad_steps],
                          columns=pd_cols).to_csv('nll_tsgd{}.csv'.format(num_grad_steps))
 
-        pd.DataFrame(data=ece_bt, columns=pd_cols).to_csv('ece_bt.csv')
-        pd.DataFrame(data=nll_bt, columns=pd_cols).to_csv('nll_bt.csv')
+        for sigma_drift in kwargs['sigma_drift']:
+            pd.DataFrame(data=ece_bt[sigma_drift], columns=pd_cols).to_csv('ece_bt{}.csv'.format(sigma_drift))
+            pd.DataFrame(data=nll_bt[sigma_drift], columns=pd_cols).to_csv('nll_bt{}.csv'.format(sigma_drift))
 
-    pd.DataFrame(data=ece_tsb, columns=pd_cols).to_csv('ece_tsb.csv')
-    pd.DataFrame(data=nll_tsb, columns=pd_cols).to_csv('nll_tsb.csv')
+    # Save after experiment terminates
+    for window_size in kwargs['window_sizes']:
+        pd.DataFrame(data=ece_mwts[window_size], columns=pd_cols).to_csv('ece_mwts{}.csv'.format(window_size))
+        pd.DataFrame(data=nll_mwts[window_size], columns=pd_cols).to_csv('nll_mwts{}.csv'.format(window_size))
 
     for num_grad_steps in kwargs['sgd_steps']:
         pd.DataFrame(data=ece_tsgd[num_grad_steps],
@@ -161,8 +181,9 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
         pd.DataFrame(data=nll_tsgd[num_grad_steps],
                      columns=pd_cols).to_csv('nll_tsgd{}.csv'.format(num_grad_steps))
 
-    pd.DataFrame(data=ece_bt, columns=pd_cols).to_csv('ece_bt.csv')
-    pd.DataFrame(data=nll_bt, columns=pd_cols).to_csv('nll_bt.csv')
+    for sigma_drift in kwargs['sigma_drift']:
+        pd.DataFrame(data=ece_bt[sigma_drift], columns=pd_cols).to_csv('ece_bt{}.csv'.format(sigma_drift))
+        pd.DataFrame(data=nll_bt[sigma_drift], columns=pd_cols).to_csv('nll_bt{}.csv'.format(sigma_drift))
 
     t1 = time.time()
     print('\n\n\nFinished: runtime (s): {:.2f}'.format(t1 - t0))
@@ -183,7 +204,13 @@ def run_from_config(config_fpath):
     # Get a fixed calibration / evaluation set
     calibration_dataset, eval_dataset = data_utils.get_cal_eval_split(config['test_set'], config['num_eval'])
 
-    return run_experiment(model, calibration_dataset, eval_dataset, **config)
+    # TODO: Set angle schedule in config file
+    # angle_schedule is a map from time_step i -> angle.
+    # This line will increase the angle by 5 every 2 timesteps.
+    # angle_schedule = [5. * (k // 2) for k in range(config['num_timesteps'])]
+    angle_schedule = np.arange(config['num_timesteps'], dtype=float)
+
+    return run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedule, **config)
 
 
 if __name__ == '__main__':
