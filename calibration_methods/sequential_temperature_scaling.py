@@ -65,7 +65,7 @@ class MovingWindowTS:
             self.stored_labels = torch.cat([self.stored_labels, labels], dim=0)[-self.window_size:]
 
         # Update the temperature by fitting TS (to convergence) on the current window.
-        self.temperature = temperature_scaling(logits, labels)['temperature']
+        self.temperature = temperature_scaling(self.stored_logits, self.stored_labels)['temperature']
 
     def calibrate(self, logits):
         tempered_logits = 1. / self.temperature * logits
