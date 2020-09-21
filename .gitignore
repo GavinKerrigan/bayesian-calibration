@@ -139,3 +139,4 @@ figures/
 dirichlet_python/
 *.ipynb
 *.yml
+*.csv
