@@ -1,7 +1,9 @@
+import warnings
 import pyro
 import pyro.distributions as dist
 from pyro.infer import MCMC, NUTS
 
+import numpy as np
 import torch
 from torch.nn.functional import softmax
 
@@ -10,6 +12,9 @@ from torch.nn.functional import softmax
 
 
 class BayesianTemperingCalibrator:
+    """ This class implements the Bayesian tempering calibrator.
+    Performs inference using NUTS.
+    """
 
     def __init__(self, prior_params, num_classes, **kwargs):
         self.num_classes = num_classes
@@ -38,11 +43,13 @@ class BayesianTemperingCalibrator:
         # TODO: Prior/posterior trace
         self.timestep = 0
         self.mcmc = None  # Contains the most recent Pyro MCMC api object
+        self.verbose = kwargs.pop('verbose', True)
 
-        print('\nInitializing BT model:\n'
-              '----| Prior: {} \n----| Inference Method: NUTS \n'
-              '----| MCMC parameters: {}'
-              ''.format(prior_params, self.mcmc_params))
+        if self.verbose:
+            print('\nInitializing BT model:\n'
+                  '----| Prior: {} \n----| Inference Method: NUTS \n'
+                  '----| MCMC parameters: {}'
+                  ''.format(prior_params, self.mcmc_params))
 
     def update(self, logits, labels):
         """ Performs an update given new observations.
@@ -60,14 +67,15 @@ class BayesianTemperingCalibrator:
         labels = labels.detach().clone()
 
         batch_size = labels.shape[0]
-        print('----| Updating HBC model\n--------| Got a batch size of: {}'.format(batch_size))
+        if self.verbose:
+            print('----| Updating HBC model\n--------| Got a batch size of: {}'.format(batch_size))
 
         self._update_prior_params()
-        print('--------| Updated priors: {}'.format(self.prior_params))
-
-        print('--------| Running inference ')
-        nuts_kernel = NUTS(hbc_model, **self.NUTS_params)
-        self.mcmc = MCMC(nuts_kernel, **self.mcmc_params, disable_progbar=False)
+        if self.verbose:
+            print('--------| Updated priors: {}'.format(self.prior_params))
+            print('--------| Running inference ')
+        nuts_kernel = NUTS(bt_model, **self.NUTS_params)
+        self.mcmc = MCMC(nuts_kernel, **self.mcmc_params, disable_progbar=not self.verbose)  # Progbar if verbose
         self.mcmc.run(self.prior_params, logits, labels)
 
         self._update_posterior_params()
@@ -125,9 +133,33 @@ class BayesianTemperingCalibrator:
 
         return calibrated_probs
 
+    def get_MAP_temperature(self, logits, labels):
+        """ Performs MAP estimation using the current prior and given data.
+         NB: This should only be called after .update() if used in a sequential setting, as this method
+         does not update the prior with sigma_drift.
+
+         See: https://pyro.ai/examples/mle_map.html
+         """
+        pyro.clear_param_store()
+        svi = pyro.infer.SVI(model=bt_model, guide=MAP_guide,
+                             optim=pyro.optim.Adam({'lr': 0.001}), loss=pyro.infer.Trace_ELBO())
+
+        loss = []
+        num_steps = 1000
+        for _ in range(num_steps):
+            loss.append(svi.step(self.prior_params, logits, labels))
+
+        eps = 1e-2
+        loss_sddev = np.std(loss[-25:])
+        if loss_sddev > eps:
+            warnings.warn('MAP optimization may not have converged ; sddev {}'.format(loss_sddev))
+
+        MAP_temperature = torch.exp(pyro.param('beta_MAP')).item()
+        return MAP_temperature
+
 
 # NB: Labels must be in [0, 1, 2, . . . num_classes - 1] !
-def hbc_model(prior_params, logits, labels, delta_constraint=None):
+def bt_model(prior_params, logits, labels):
     """ This function defines the Pyro model for HBC.
     """
     n_obs = logits.shape[0]  # Batch size
@@ -142,3 +174,9 @@ def hbc_model(prior_params, logits, labels, delta_constraint=None):
     # Observation plate ; vectorized
     with pyro.plate('obs', size=n_obs):
         a = pyro.sample('cat_obs', dist.Categorical(probs=probs), obs=labels)
+
+
+def MAP_guide(prior_params, logits, labels):
+    """ Defines a guide for use in MAP inference. """
+    beta_MAP = pyro.param('beta_MAP', torch.tensor(1., requires_grad=True))
+    pyro.sample('beta', dist.Delta(beta_MAP))
