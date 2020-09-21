@@ -65,15 +65,16 @@ def load_trained_model(model_name, train_set, device=torch.device('cpu')):
     return model.to(device)
 
 
-def forward_pass(model, data_loader, n_classes, device=torch.device('cpu')):
+def forward_pass(model, data_loader, n_classes, device=torch.device('cpu'), verbose=True):
     """" Performs a forward pass of the model on the given data loader.
 
     Returns:
         logits: tensor ; shape (data_loader_size, n_classes)
         labels: tensor ; shape (data_loader_size, )
     """
-    t0 = time.time()
-    print('\nRunning forward pass')
+    if verbose:
+        t0 = time.time()
+        print('\nRunning forward pass')
 
     with torch.no_grad():
         data_loader_size = len(data_loader.dataset)
@@ -89,8 +90,10 @@ def forward_pass(model, data_loader, n_classes, device=torch.device('cpu')):
 
             logits[i * batch_size:(i + 1) * batch_size] = batch_logits  # Store logits
             labels[i * batch_size:(i + 1) * batch_size] = batch_labels  # Store labels
-        t1 = time.time()
-        print('----| Forward pass complete (Runtime (s): {:.2f})'.format(t1 - t0))
+
+        if verbose:
+            t1 = time.time()
+            print('----| Forward pass complete (Runtime (s): {:.2f})'.format(t1 - t0))
 
     return logits, labels
 

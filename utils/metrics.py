@@ -65,7 +65,7 @@ def expected_calibration_error(probs, labels, bins=15):
     return ece
 
 
-def classwise_ece(probs, labels, bins=15):
+def classwise_ece(probs, labels, bins=15, detailed=False):
     """ Computes the classwise ECE (Kull et al, 2019)
 
     See: (Kull et al, 2019) "Beyond temperature scaling: Obtaining well-calibrated multiclass probabilities
@@ -92,7 +92,10 @@ def classwise_ece(probs, labels, bins=15):
     # cw-ECE is mean of all class-i ECEs
     cw_ece = np.mean(ece_per_class)
 
-    return cw_ece
+    if detailed:
+        return cw_ece, ece_per_class
+    else:
+        return cw_ece
 
 
 def _one_class_ece(probs, labels, bins=15):
