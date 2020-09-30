@@ -7,12 +7,13 @@ import numpy as np
 import torch
 from torch.nn.functional import softmax
 
-""" This class implements the Bayesian Tempering calibrator. 
+""" This class implements the Bayesian vector scaling calibrator.
+This is the 'standard' version with no fancy modelling. 
 """
 
 
-class BayesianTemperingCalibrator:
-    """ This class implements the Bayesian tempering calibrator.
+class BayesianVSCalibrator:
+    """ This class implements the Bayesian VS calibrator, with bias.
     Performs inference using NUTS.
     """
 
@@ -28,11 +29,14 @@ class BayesianTemperingCalibrator:
                             'num_chains': kwargs.pop('num_chains', 4)
                             }
 
-        # Prior parameters on beta / delta ; assumes each delta is iid
-        self.prior_params = {'mu_beta': prior_params['mu_beta'],
-                             'sigma_beta': prior_params['sigma_beta']}
+        # Prior parameters on beta / delta ; assumes each weight/bias is i.i.d from its respective distribution.
+        self.prior_params = {'mu_beta': torch.empty(self.num_classes).fill_(prior_params['mu_beta']),
+                             'sigma_beta': torch.empty(self.num_classes).fill_(prior_params['sigma_beta']),
+                             'mu_delta': torch.empty(self.num_classes).fill_(prior_params['mu_delta']),
+                             'sigma_delta': torch.empty(self.num_classes).fill_(prior_params['sigma_delta'])}
 
         # Posterior parameters after ADF
+        # TODO
         self.posterior_params = {'mu_beta': None,
                                  'sigma_beta': None}
 
@@ -46,7 +50,7 @@ class BayesianTemperingCalibrator:
         self.verbose = kwargs.pop('verbose', True)
 
         if self.verbose:
-            print('\nInitializing BT model:\n'
+            print('\nInitializing VS model:\n'
                   '----| Prior: {} \n----| Inference Method: NUTS \n'
                   '----| MCMC parameters: {}'
                   ''.format(prior_params, self.mcmc_params))
@@ -70,15 +74,17 @@ class BayesianTemperingCalibrator:
         if self.verbose:
             print('----| Updating HBC model\n--------| Got a batch size of: {}'.format(batch_size))
 
-        self._update_prior_params()
+        # TODO
+        # self._update_prior_params()
         if self.verbose:
             print('--------| Updated priors: {}'.format(self.prior_params))
             print('--------| Running inference ')
-        nuts_kernel = NUTS(bt_model, **self.NUTS_params)
+        nuts_kernel = NUTS(bvs_model, **self.NUTS_params)
         self.mcmc = MCMC(nuts_kernel, **self.mcmc_params, disable_progbar=not self.verbose)  # Progbar if verbose
         self.mcmc.run(self.prior_params, logits, labels)
 
-        self._update_posterior_params()
+        # TODO
+        # self._update_posterior_params()
         self.timestep += 1
 
         return self.mcmc
@@ -88,6 +94,7 @@ class BayesianTemperingCalibrator:
 
         If this is the first batch, i.e. timestep == 0, do nothing.
         """
+        # TODO
         if self.timestep > 0:
             self.prior_params['mu_beta'] = self.posterior_params['mu_beta']
             self.prior_params['sigma_beta'] = self.posterior_params['sigma_beta'] + self.sigma_drift
@@ -95,6 +102,7 @@ class BayesianTemperingCalibrator:
     def _update_posterior_params(self):
         """ Fits a normal distribution to the current beta samples using moment matching.
         """
+        # TODO
         beta_samples = self.get_current_posterior_samples()
         self.posterior_params['mu_beta'] = beta_samples.mean().item()
         self.posterior_params['sigma_beta'] = beta_samples.std().item()
@@ -105,9 +113,7 @@ class BayesianTemperingCalibrator:
         if self.mcmc is None:
             return None
 
-        posterior_samples = self.mcmc.get_samples()['beta']
-
-        return posterior_samples
+        return self.mcmc.get_samples()
 
     def calibrate(self, logit):
         """ Calibrates the given batch of logits using the current posterior samples.
@@ -116,14 +122,13 @@ class BayesianTemperingCalibrator:
             logit: tensor ; shape (batch_size, num_classes)
         """
         # Get beta samples
-        beta_samples = self.get_current_posterior_samples()  # Shape (num_samples, num_classes)
+        beta_samples = self.get_current_posterior_samples()['beta']  # Shape (num_samples, num_classes)
+        delta_samples = self.get_current_posterior_samples()['delta']  # Shape (num_samples, num_classes)
 
-        # Map betas to temperatures
-        temperature_samples = torch.exp(-1. * beta_samples)  # Shape (num_samples, )
-
-        # Get a batch of logits for each sampled temperature
+        # Get a batch of logits for each sampled parameter vector
         # Shape (num_samples, batch_size, num_classes)
-        tempered_logit_samples = temperature_samples.view(-1, 1, 1) * logit
+        tempered_logit_samples = beta_samples.view(-1, 1, self.num_classes) * logit + \
+                                 delta_samples.view(-1, 1, self.num_classes)
 
         # Softmax the sampled logits to get sampled probabilities
         prob_samples = softmax(tempered_logit_samples, dim=2)  # Shape (num_samples, batch_size, num_classes)
@@ -138,12 +143,10 @@ class BayesianTemperingCalibrator:
          NB: This should only be called after .update() if used in a sequential setting, as this method
          does not update the prior with sigma_drift.
 
-         Further note: This method is not very robust -- make sure to check for convergence if used.
-
          See: https://pyro.ai/examples/mle_map.html
          """
         pyro.clear_param_store()
-        svi = pyro.infer.SVI(model=bt_model, guide=MAP_guide,
+        svi = pyro.infer.SVI(model=bvs_model, guide=MAP_guide,
                              optim=pyro.optim.Adam({'lr': 0.001}), loss=pyro.infer.Trace_ELBO())
 
         loss = []
@@ -155,24 +158,41 @@ class BayesianTemperingCalibrator:
         loss_sddev = np.std(loss[-25:])
         if loss_sddev > eps:
             warnings.warn('MAP optimization may not have converged ; sddev {}'.format(loss_sddev))
-            print('Here is the last few loss terms for inspection: \n', loss[-50:])
 
-        MAP_temperature = torch.exp(pyro.param('beta_MAP')).item()
-        return MAP_temperature
+        beta_MAP = pyro.param('beta_MAP').detach()
+        delta_MAP = pyro.param('delta_MAP').detach()
+        return beta_MAP, delta_MAP
 
 
 # NB: Labels must be in [0, 1, 2, . . . num_classes - 1] !
-def bt_model(prior_params, logits, labels):
-    """ This function defines the Pyro model for BT.
+def bvs_model(prior_params, logits, labels):
+    """ This function defines the Pyro model for BVS.
     """
     n_obs = logits.shape[0]  # Batch size
+    n_cls = logits.shape[1]  # Number of classes
 
-    # Prior over global temperature Beta ~ N( beta_mu, beta_sigma^2 )
-    prior_beta_mu = prior_params['mu_beta']
-    prior_beta_sigma = prior_params['sigma_beta']
-    beta = pyro.sample('beta', dist.Normal(prior_beta_mu, prior_beta_sigma))  # Shape (1, )
+    # TODO: Question: Should I even bother constraining the weights to be positive here?
+    # Current implementation is unconstrained.
 
-    probs = softmax(torch.exp(-1. * beta) * logits, dim=1)  # Shape (n_obs, n_classes) ; tempered probabilities
+    # Prior over temperatures Beta ~ N( beta_mu, beta_sigma^2 )
+    prior_beta_mu = prior_params['mu_beta']  # Shape (n_classes, )
+    prior_beta_sigma = prior_params['sigma_beta']  # Shape (n_classes, )
+    beta = pyro.sample('beta', dist.Normal(prior_beta_mu, prior_beta_sigma))  # Shape (n_classes, )
+    """
+    beta = pyro.sample('beta', dist.MultivariateNormal(prior_beta_mu * torch.ones(n_cls),
+                                                       covariance_matrix=prior_beta_sigma * torch.eye(n_cls)))
+    """
+
+    # Prior over delta's ; vectorized
+    prior_delta_mu = prior_params['mu_delta']  # Shape (n_classes, )
+    prior_delta_sigma = prior_params['sigma_delta']  # Shape (n_classes, )
+    delta = pyro.sample('delta', dist.Normal(prior_delta_mu, prior_delta_sigma))  # Shape (n_classes, )
+    """
+    delta = pyro.sample('delta', dist.MultivariateNormal(prior_delta_mu * torch.ones(n_cls),
+                                                        covariance_matrix=prior_delta_sigma * torch.eye(n_cls)))
+    """
+    tempered_logits = beta * logits + delta
+    probs = softmax(tempered_logits, dim=1)  # Shape (n_obs, n_classes) ; tempered probabilities
 
     # Observation plate ; vectorized
     with pyro.plate('obs', size=n_obs):
@@ -181,5 +201,9 @@ def bt_model(prior_params, logits, labels):
 
 def MAP_guide(prior_params, logits, labels):
     """ Defines a guide for use in MAP inference. """
-    beta_MAP = pyro.param('beta_MAP', torch.tensor(1., requires_grad=True))
+    n_cls = logits.shape[1]  # Num classes
+
+    beta_MAP = pyro.param('beta_MAP', torch.ones(n_cls, requires_grad=True))
+    delta_MAP = pyro.param('delta_MAP', torch.zeros(n_cls, requires_grad=True))
     pyro.sample('beta', dist.Delta(beta_MAP))
+    pyro.sample('delta', dist.Delta(delta_MAP))

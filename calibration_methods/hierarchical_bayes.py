@@ -1,6 +1,8 @@
 import pyro
 import pyro.distributions as dist
 from pyro.infer import MCMC, NUTS
+import numpy as np
+import warnings
 
 import torch
 from torch.nn.functional import softmax
@@ -116,6 +118,31 @@ class HierarchicalBayesianCalibrator:
 
         return calibrated_probs
 
+    def get_MAP_temperature(self, logits, labels):
+        """ Performs MAP estimation using the current prior and given data.
+         NB: This should only be called after .update() if used in a sequential setting, as this method
+         does not update the prior with sigma_drift.
+
+         See: https://pyro.ai/examples/mle_map.html
+         """
+        pyro.clear_param_store()
+        svi = pyro.infer.SVI(model=hbc_model, guide=MAP_guide,
+                             optim=pyro.optim.Adam({'lr': 0.001}), loss=pyro.infer.Trace_ELBO())
+
+        loss = []
+        num_steps = 5000
+        for _ in range(num_steps):
+            loss.append(svi.step(self.prior_params, logits, labels))
+
+        eps = 2e-2
+        loss_sddev = np.std(loss[-25:])
+        if loss_sddev > eps:
+            warnings.warn('MAP optimization may not have converged ; sddev {}'.format(loss_sddev))
+
+        beta_MAP = pyro.param('beta_MAP').detach()
+        delta_MAP = pyro.param('delta_MAP').detach()
+        return beta_MAP, delta_MAP
+
 
 # NB: Labels must be in [0, 1, 2, . . . num_classes - 1] !
 def hbc_model(prior_params, logits, labels, delta_constraint=None):
@@ -146,3 +173,13 @@ def hbc_model(prior_params, logits, labels, delta_constraint=None):
     # Observation plate ; vectorized
     with pyro.plate('obs', size=n_obs):
         a = pyro.sample('cat_obs', dist.Categorical(probs=probs), obs=labels)
+
+
+def MAP_guide(prior_params, logits, labels):
+    """ Defines a guide for use in MAP inference. """
+    n_cls = logits.shape[1]  # Num classes
+
+    beta_MAP = pyro.param('beta_MAP', torch.ones(n_cls, requires_grad=True))
+    delta_MAP = pyro.param('delta_MAP', torch.zeros(n_cls, requires_grad=True))
+    pyro.sample('beta', dist.Delta(beta_MAP))
+    pyro.sample('delta', dist.Delta(delta_MAP))

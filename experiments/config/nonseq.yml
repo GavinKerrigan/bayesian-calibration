@@ -10,6 +10,9 @@ num_classes: 10  # Number of classes in test set (NB: Should match train_set)
 
 
 batch_size: # Batch sizes to be iterated over
+  - 3
+  - 5
+  - 7
   - 10
   - 20
   - 30

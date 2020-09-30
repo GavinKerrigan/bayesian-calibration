@@ -18,7 +18,7 @@ from calibration_methods.sequential_temperature_scaling import MovingWindowTS, S
 """
 
 
-def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedule, **kwargs):
+def run_experiment_rotate(model, calibration_dataset, eval_dataset, schedule, **kwargs):
     # Initializing some various useful things
     t0 = time.time()
     nll = NLLLoss()
@@ -75,11 +75,11 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
 
         for i in tqdm(range(kwargs['num_timesteps']), desc='Timestep', leave=False):
             # =============================================
-            # Get eval/cal logits&labels, after rotation by angle_schedule[i]
+            # Get eval/cal logits&labels, after perturbation by schedule[i]
             # =============================================
             with torch.no_grad():
                 # Perturb eval_set and forward pass model
-                eval_dataset.dataset.set_angle(angle_schedule[i])
+                eval_dataset.dataset.set_param(schedule[i])
                 eval_loader = DataLoader(eval_dataset, batch_size=256, shuffle=False, num_workers=0)
                 eval_logits, eval_labels = model_utils.forward_pass(model, eval_loader, kwargs['num_classes'],
                                                                     device=gpu, verbose=False)
@@ -93,7 +93,7 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
 
                 # Perturb the calibration data
                 # (NB: not really necessary as we perturb the eval set, which shares the .dataset field)
-                calibration_dataset.dataset.set_angle(angle_schedule[i])
+                calibration_dataset.dataset.set_param(schedule[i])
                 # Get a random batch of calibration data of size batch_size
                 calibration_batch_idxs = np.random.choice(len(calibration_dataset),
                                                           size=kwargs['batch_size'], replace=False)
@@ -141,7 +141,7 @@ def run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedu
                 nll_bt_run[sigma_drift].append(nll(eval_probs_bt.log(), eval_labels.long()).item())
                 # ---- | Run MAP estimation for comparison
                 MAP_temperature = bt_models[sigma_drift].get_MAP_temperature(cal_logits, cal_labels)
-                MAP_eval_probs = softmax(1./MAP_temperature * eval_logits, dim=1)
+                MAP_eval_probs = softmax(1. / MAP_temperature * eval_logits, dim=1)
                 ece_bt_MAP_run[sigma_drift].append(expected_calibration_error(MAP_eval_probs, eval_labels))
                 nll_bt_MAP_run[sigma_drift].append(nll(MAP_eval_probs.log(), eval_labels.long()).item())
 
@@ -212,27 +212,29 @@ def run_from_config(config_fpath):
     # Get a fixed calibration / evaluation set
     calibration_dataset, eval_dataset = data_utils.get_cal_eval_split(config['test_set'], config['num_eval'])
 
-    angle_schedule_type = config.pop('angle_schedule')
-    if angle_schedule_type == 'linear':
-        angle_schedule = linear_angle_schedule(config['angle_rate'], config['num_timesteps'])
-    elif angle_schedule_type == 'triangular':
-        angle_schedule = linear_angle_schedule(config['angle_rate'], config['num_timesteps'])
+    schedule_type = config.pop('schedule')
+    if schedule_type == 'linear':
+        schedule = linear_schedule(config['rate'], config['num_timesteps'])
+    elif schedule_type == 'triangular':
+        schedule = linear_schedule(config['rate'], config['num_timesteps'])
+    else:
+        raise NotImplementedError
 
-    return run_experiment_rotate(model, calibration_dataset, eval_dataset, angle_schedule, **config)
-
-
-def linear_angle_schedule(rate, num_timesteps):
-    # Defines an angle schedule that increases the angle by rate at each timestep.
-    angle_schedule = rate * np.arange(num_timesteps, dtype=float)
-    return angle_schedule
+    return run_experiment_rotate(model, calibration_dataset, eval_dataset, schedule, **config)
 
 
-def triangular_angle_schedule(rate, num_timesteps):
-    # Defines an angle schedule that increases the angle by rate until num_timesteps/2, and then decreases
-    angle_schedule = [rate * i if i <= num_timesteps / 2.
-                      else rate * (num_timesteps - i)
-                      for i in range(num_timesteps)]
-    return angle_schedule
+def linear_schedule(rate, num_timesteps):
+    # Defines a schedule that increases by rate at each timestep.
+    schedule = rate * np.arange(num_timesteps, dtype=float)
+    return schedule
+
+
+def triangular_schedule(rate, num_timesteps):
+    # Defines a schedule that increases by rate until num_timesteps/2, and then decreases
+    schedule = [rate * i if i <= num_timesteps / 2.
+                else rate * (num_timesteps - i)
+                for i in range(num_timesteps)]
+    return schedule
 
 
 if __name__ == '__main__':

@@ -126,9 +126,3 @@ def run_from_config(config_fpath):
     calibration_dataset, eval_dataset = data_utils.get_cal_eval_split(config['test_set'], config['num_eval'])
 
     return run_experiment(model, calibration_dataset, eval_dataset, **config)
-
-
-if __name__ == '__main__':
-    config_file = 'experiments/config/nonseq.yml'
-    print('config file: {}'.format(config_file))
-    run_from_config(config_file)

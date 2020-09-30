@@ -66,7 +66,7 @@ def _scaling_nll_optimizer(logits, labels, weights, bias=None, optimizer='adam')
         else:
             params = [weights, bias]
         optimizer = optim.Adam(params, lr=0.01)
-        num_steps = 500
+        num_steps = 7500
         loss_tr = []
         loss = None
         for _ in range(num_steps):
@@ -98,7 +98,7 @@ def _scaling_nll_optimizer(logits, labels, weights, bias=None, optimizer='adam')
             # loss_tr.append(loss.item())
             return loss
 
-        for _ in range(100):
+        for _ in range(1000):
             optimizer.step(closure)
 
         out = {'weights': weights.detach(),

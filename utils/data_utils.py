@@ -59,6 +59,12 @@ def load_dataset(dataset_name, **kwargs):
     elif dataset_name == 'cifar100r':
         from data.nonstationary_datasets import CIFAR100R
         dataset = CIFAR100R()
+    elif dataset_name == 'cifar10gb':
+        from data.nonstationary_datasets import CIFAR10GB
+        dataset = CIFAR10GB()
+    elif dataset_name == 'cifar100gb':
+        from data.nonstationary_datasets import CIFAR100GB
+        dataset = CIFAR100GB()
     else:
         raise NotImplementedError
 

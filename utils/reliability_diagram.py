@@ -46,7 +46,7 @@ def confidence_reliability_diagram(probs, labels, bins=15):
     ax.text(0.01, .875, 'ECE: {:.2f}'.format(100. * ece), size=15)
 
     score_hist_ax = ax.twinx()
-    score_hist_ax.hist(scores, density=True, label='Score distr.', color='orange', alpha=0.7, bins=20)
+    score_hist_ax.hist(scores.numpy(), density=True, label='Score distr.', color='orange', alpha=0.7, bins=20)
     score_hist_ax.set_ylim(0, 35)
     score_hist_ax.legend(loc='upper left')
     score_hist_ax.set_yticks([])

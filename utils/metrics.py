@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from sklearn.preprocessing import label_binarize
+from torch.nn.functional import softmax
 
 """
 This file contains various metrics for measuring calibration.
@@ -119,3 +120,32 @@ def _one_class_ece(probs, labels, bins=15):
                                                  for i in range(bins) if counts[i] > 0])
 
     return this_class_ece
+
+
+def bayesian_ece_samples(logits, labels, beta_samples, bins=15):
+    """ Computes a Bayesian estimate of the ECE from samples of our calibration parameters.
+
+    Current implementation assumes just Bayesian TS
+    """
+
+    ece_samples = []
+    for beta in beta_samples:
+        probs = softmax(np.exp(-1. * beta) * logits, dim=1)
+        ece = expected_calibration_error(probs, labels, bins=bins)
+        ece_samples.append(ece)
+
+    return ece_samples
+
+
+def bayesian_ece_credible_interval(logits, labels, beta_samples, lower, upper, bins=15):
+    """ Thin wrapper around bayesian_ece_samples that computes the given CIs.
+
+    lower/upper are scalars in [0, 1] representing the lower/upper percentiles for the CI.
+    """
+
+    ece_samples = bayesian_ece_samples(logits, labels, beta_samples, bins=bins)
+    lower_ece = np.quantile(ece_samples, lower)
+    upper_ece = np.quantile(ece_samples, upper)
+
+    return lower_ece, upper_ece
+
