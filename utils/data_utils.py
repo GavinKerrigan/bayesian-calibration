@@ -65,6 +65,9 @@ def load_dataset(dataset_name, **kwargs):
     elif dataset_name == 'cifar100gb':
         from data.nonstationary_datasets import CIFAR100GB
         dataset = CIFAR100GB()
+    elif dataset_name == 'cifar10imba':
+        from data.imbalanced_datasets import CIFAR10Imba
+        dataset = CIFAR10Imba(class_ratios=kwargs['class_ratios'])
     else:
         raise NotImplementedError
 
@@ -78,11 +81,10 @@ def get_cal_eval_split(dataset_name, num_eval, **kwargs):
         dataset_name: str ;
         num_eval: int ; size of evaluation set
     """
-    dataset = load_dataset(dataset_name)
+    dataset = load_dataset(dataset_name, **kwargs)
     num_cal = len(dataset) - num_eval
     cal_dataset, eval_dataset = random_split(dataset, [num_cal, num_eval])
     if 'num_cal' in kwargs.keys():
         cal_dataset = Subset(cal_dataset, torch.arange(kwargs['num_cal']))
 
     return cal_dataset, eval_dataset
-

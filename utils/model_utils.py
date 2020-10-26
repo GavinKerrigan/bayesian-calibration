@@ -27,7 +27,8 @@ def load_trained_model(model_name, train_set, device=torch.device('cpu')):
     if train_set.startswith('cifar'):
         # Load local cifar-trained models
         num_classes = {'cifar100': 100,
-                       'cifar10': 10}
+                       'cifar10': 10,
+                       'cifar10imba': 10}
 
         train_set = train_set.lower().strip()
         model_name = model_name.lower().strip()
@@ -50,6 +51,13 @@ def load_trained_model(model_name, train_set, device=torch.device('cpu')):
             from models.vgg import vgg19_bn
             state_dict = _strip_parallel_model(state_dict)
             model = vgg19_bn(num_classes=num_classes[train_set])
+        elif model_name == 'wrn-28-10':
+            from models.wrn import wrn
+            state_dict = _strip_parallel_model(state_dict)
+            model = wrn(num_classes=num_classes[train_set],
+                        depth=28,
+                        widen_factor=10,
+                        dropRate=0.3)
         else:
             raise NotImplementedError
 
